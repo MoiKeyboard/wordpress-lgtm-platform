@@ -1,0 +1,130 @@
+// =============================================================================
+// Grafana Alloy - Unified Telemetry Collector (Metrics, Logs, OTLP Traces)
+// Consolidates Node Exporter + Promtail + OTel Collector into 1 binary
+// =============================================================================
+
+logging {
+  level  = "warn"
+  format = "logfmt"
+}
+
+// -----------------------------------------------------------------------------
+// 1. METRICS: Built-in Host Unix Exporter (CPU, RAM, Swap, Disk, Network)
+// -----------------------------------------------------------------------------
+prometheus.exporter.unix "host" {
+  procfs_path = "/host/proc"
+  sysfs_path  = "/host/sys"
+  rootfs_path = "/host/root"
+}
+
+prometheus.scrape "host_metrics" {
+  targets         = prometheus.exporter.unix.host.targets
+  scrape_interval = "30s"
+  forward_to      = [prometheus.relabel.instance_label.receiver]
+}
+
+prometheus.relabel "instance_label" {
+  rule {
+    target_label = "instance"
+    replacement  = "wordpress-ec2-host"
+  }
+  rule {
+    target_label = "job"
+    replacement  = "node-exporter"
+  }
+  forward_to = [prometheus.remote_write.prometheus.receiver]
+}
+
+prometheus.remote_write "prometheus" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 2. LOGS: Docker Container Discovery & Log Shipping to Grafana Loki
+// -----------------------------------------------------------------------------
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "container_labels" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.container_labels.output
+  relabel_rules = discovery.relabel.container_labels.rules
+  forward_to    = [loki.process.parse_logs.receiver]
+}
+
+loki.process "parse_logs" {
+  stage.match {
+    selector = "{service=\"nginx\"}"
+    stage.json {
+      expressions = {
+        method   = "method",
+        status   = "status",
+        uri      = "uri",
+        trace_id = "trace_id",
+      }
+    }
+    stage.labels {
+      values = {
+        method = "",
+        status = "",
+      }
+    }
+  }
+  forward_to = [loki.write.loki.receiver]
+}
+
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 3. TRACES: OpenTelemetry OTLP Receiver (Nginx gRPC :4317 & PHP/DB HTTP :4318)
+// -----------------------------------------------------------------------------
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    traces = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  timeout         = "2s"
+  send_batch_size = 64
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}

@@ -1,0 +1,38 @@
+groups:
+  - name: wordpress_production_alerts
+    rules:
+      - alert: HighHostMemoryUtilization
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Memory Utilization on WordPress EC2 Host (>85%)"
+          description: "Available physical memory has dropped below 15% for more than 5 minutes."
+
+      - alert: HighSwapUtilization
+        expr: (1 - (node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes)) * 100 > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated Swap Usage (>50%)"
+          description: "The instance is actively swapping (>50% of 2GB swap used). Investigate container memory consumption."
+
+      - alert: LowRootDiskSpace
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 15
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low Disk Space on Root Volume (<15% Free)"
+          description: "Root EBS volume has less than 15% free space remaining."
+
+      - alert: HighCpuLoad
+        expr: node_load1 > 2.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU Load on 1-vCPU Instance"
+          description: "1-minute load average has exceeded 2.0 on the 1-vCPU EC2 instance."

@@ -1,0 +1,101 @@
+---
+- name: Check if swap file already exists
+  ansible.builtin.stat:
+    path: "{{ swap_file_path }}"
+  register: swap_file_check
+
+- name: Allocate 2GB swap file for t2.micro OOM protection
+  ansible.builtin.command:
+    cmd: "fallocate -l {{ swap_file_size_mb }}M {{ swap_file_path }}"
+  when: not swap_file_check.stat.exists
+  changed_when: true
+
+- name: Set strict 0600 permissions on swap file
+  ansible.builtin.file:
+    path: "{{ swap_file_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Format swap file if newly created
+  ansible.builtin.command:
+    cmd: "mkswap {{ swap_file_path }}"
+  when: not swap_file_check.stat.exists
+  changed_when: true
+
+- name: Enable swap file immediately
+  ansible.builtin.command:
+    cmd: "swapon {{ swap_file_path }}"
+  when: ansible_swaptotal_mb < 100
+  changed_when: true
+
+- name: Persist swap file in /etc/fstab
+  ansible.builtin.mount:
+    name: none
+    src: "{{ swap_file_path }}"
+    fstype: swap
+    opts: sw
+    passno: 0
+    dump: 0
+    state: present
+
+- name: Apply production kernel memory and network sysctl hardening
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-production-tuning.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Memory & Swap tuning for 1GB RAM instance
+      vm.swappiness = 10
+      vm.vfs_cache_pressure = 50
+      vm.overcommit_memory = 1
+
+      # Network & SYN flood hardening
+      net.ipv4.tcp_syncookies = 1
+      net.ipv4.conf.all.rp_filter = 1
+      net.ipv4.conf.default.rp_filter = 1
+      net.ipv4.conf.all.accept_redirects = 0
+      net.ipv4.conf.default.accept_redirects = 0
+      net.ipv4.conf.all.send_redirects = 0
+  register: sysctl_config
+
+- name: Reload sysctl parameters
+  ansible.builtin.command:
+    cmd: sysctl --system
+  when: sysctl_config.changed
+  changed_when: true
+
+- name: Ensure essential packages and unattended-upgrades are installed
+  ansible.builtin.apt:
+    name:
+      - ufw
+      - unattended-upgrades
+      - ca-certificates
+      - curl
+      - gnupg
+      - openssl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Allow OpenSSH through UFW before enabling firewall
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+
+- name: Allow HTTP (80) and HTTPS (443) through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "80"
+    - "443"
+
+- name: Enable UFW with default deny incoming policy
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming

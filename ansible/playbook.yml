@@ -1,0 +1,33 @@
+---
+- name: Provision, Harden, and Deploy Production WordPress + LGTM Stack
+  hosts: all
+  become: true
+  vars:
+    stack_install_dir: /opt/wordpress-stack
+    swap_file_path: /swapfile
+    swap_file_size_mb: 2048
+    domain_name: "{{ lookup('env', 'DOMAIN_NAME') | default(ansible_host, true) }}"
+    mysql_root_password: "{{ lookup('env', 'MYSQL_ROOT_PASSWORD') }}"
+    mysql_database: "{{ lookup('env', 'MYSQL_DATABASE') | default('wordpress', true) }}"
+    mysql_user: "{{ lookup('env', 'MYSQL_USER') | default('wp_user', true) }}"
+    mysql_password: "{{ lookup('env', 'MYSQL_PASSWORD') }}"
+    grafana_admin_user: "{{ lookup('env', 'GF_SECURITY_ADMIN_USER') | default('admin', true) }}"
+    grafana_admin_password: "{{ lookup('env', 'GF_SECURITY_ADMIN_PASSWORD') }}"
+
+  pre_tasks:
+    - name: Validate required secrets are provided
+      ansible.builtin.assert:
+        that:
+          - mysql_root_password | length >= 8
+          - mysql_password | length >= 8
+          - grafana_admin_password | length >= 8
+        fail_msg: "Mandatory secret environment variables (MYSQL_ROOT_PASSWORD, MYSQL_PASSWORD, GF_SECURITY_ADMIN_PASSWORD) must be set and at least 8 characters long."
+        quiet: true
+
+  roles:
+    - role: host_hardening
+      tags: [hardening, os]
+    - role: docker_engine
+      tags: [docker, os]
+    - role: wordpress_lgtm_stack
+      tags: [deploy, stack]

@@ -1,0 +1,91 @@
+name: CD - Deploy WordPress & LGTM Stack to AWS EC2
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: "Ansible Convergence & Smoke Verification"
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Verify Required GitHub Secrets Exist
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$EC2_HOST" ] || [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "::warning::GitHub Secrets (EC2_HOST, SSH_PRIVATE_KEY, etc.) are not configured yet. Skipping live SSH deployment."
+            echo "SKIP_DEPLOY=true" >> "$GITHUB_ENV"
+          else
+            echo "SKIP_DEPLOY=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install Ansible
+        if: env.SKIP_DEPLOY == 'false'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ansible
+
+      - name: Provision Ephemeral SSH Key in RAM (/dev/shm)
+        if: env.SKIP_DEPLOY == 'false'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          printf "%s\n" "$SSH_PRIVATE_KEY" | tr -d '\r' > /dev/shm/ec2_deploy_key
+          chmod 0600 /dev/shm/ec2_deploy_key
+
+      - name: Execute Ansible Playbook Against EC2 Target
+        if: env.SKIP_DEPLOY == 'false'
+        working-directory: ansible
+        env:
+          DOMAIN_NAME: ${{ secrets.EC2_HOST }}
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+          GF_SECURITY_ADMIN_PASSWORD: ${{ secrets.GF_SECURITY_ADMIN_PASSWORD }}
+        run: |
+          ansible-playbook playbook.yml \
+            -i "${{ secrets.EC2_HOST }}," \
+            -u "${{ secrets.EC2_USER }}" \
+            --private-key /dev/shm/ec2_deploy_key \
+            --extra-vars "ansible_become_pass=${{ secrets.ANSIBLE_BECOME_PASS }}"
+
+      - name: Execute Post-Deployment HTTPS Smoke & Telemetry Checks
+        if: env.SKIP_DEPLOY == 'false'
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          echo "Waiting 15s for services to stabilize..."
+          sleep 15
+          echo "1. Verifying HTTP -> HTTPS 301 Redirect..."
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://${EC2_HOST}/")
+          echo "HTTP Status: $HTTP_CODE"
+          [ "$HTTP_CODE" = "301" ]
+
+          echo "2. Verifying WordPress HTTPS Endpoint..."
+          WP_CODE=$(curl -k -L -s -o /dev/null -w "%{http_code}" "https://${EC2_HOST}/")
+          echo "WordPress HTTPS Status: $WP_CODE"
+          [ "$WP_CODE" = "200" ] || [ "$WP_CODE" = "302" ]
+
+          echo "3. Verifying XML-RPC Security Block (Expected 403)..."
+          XMLRPC_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" "https://${EC2_HOST}/xmlrpc.php")
+          echo "XML-RPC Status: $XMLRPC_CODE"
+          [ "$XMLRPC_CODE" = "403" ]
+
+          echo "4. Verifying Grafana LGTM Health Endpoint..."
+          GF_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" "https://${EC2_HOST}/grafana/api/health")
+          echo "Grafana Health Status: $GF_CODE"
+          [ "$GF_CODE" = "200" ]
+
+      - name: Shred Ephemeral SSH Private Key
+        if: always()
+        run: |
+          rm -f /dev/shm/ec2_deploy_key

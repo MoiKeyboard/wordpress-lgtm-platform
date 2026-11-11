@@ -1,0 +1,227 @@
+services:
+  # ===========================================================================
+  # 1. APPLICATION TIER: MariaDB + WordPress (PHP-FPM + OTel) + Nginx Edge Proxy
+  # ===========================================================================
+  mariadb:
+    image: mariadb:10.11
+    container_name: mariadb
+    restart: unless-stopped
+    mem_limit: 256m
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
+      MYSQL_USER: ${MYSQL_USER:-wp_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./mariadb/my.cnf:/etc/mysql/conf.d/99-low-memory.cnf:ro
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  wordpress:
+    build:
+      context: ./wordpress
+      dockerfile: Dockerfile
+    image: wp-platform-otel:6.7-fpm-alpine
+    container_name: wordpress
+    restart: unless-stopped
+    mem_limit: 192m
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: mariadb:3306
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE:-wordpress}
+      WORDPRESS_DB_USER: ${MYSQL_USER:-wp_user}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+      WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}
+      WORDPRESS_DEBUG: ${WORDPRESS_DEBUG:-0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+      WORDPRESS_CONFIG_EXTRA: |
+        define('DISALLOW_FILE_EDIT', true);
+        define('FORCE_SSL_ADMIN', true);
+        define('WP_MEMORY_LIMIT', '96M');
+        if (isset($$_SERVER['HTTP_X_FORWARDED_PROTO']) && $$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+            $$_SERVER['HTTPS'] = 'on';
+        }
+    volumes:
+      - wp_data:/var/www/html
+    networks:
+      - frontend_net
+      - backend_net
+      - observability_net
+
+  nginx:
+    image: nginx:1.27-alpine-otel
+    container_name: nginx
+    restart: unless-stopped
+    mem_limit: 64m
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - wordpress
+      - grafana
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - wp_data:/var/www/html:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - frontend_net
+      - observability_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ===========================================================================
+  # 2. OBSERVABILITY TIER: Modern Grafana LGTM Stack + Unified Alloy Collector
+  # ===========================================================================
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: loki
+    user: "0"
+    restart: unless-stopped
+    mem_limit: 96m
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      GOMEMLIMIT: 60MiB
+      GOGC: "25"
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    volumes:
+      - ./lgtm/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    networks:
+      - observability_net
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    container_name: tempo
+    user: "0"
+    restart: unless-stopped
+    mem_limit: 72m
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      GOMEMLIMIT: 45MiB
+      GOGC: "25"
+    command: ["-config.file=/etc/tempo/tempo-config.yml"]
+    volumes:
+      - ./lgtm/tempo/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
+      - tempo_data:/var/tempo
+    networks:
+      - observability_net
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: prometheus
+    restart: unless-stopped
+    mem_limit: 112m
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      GOMEMLIMIT: 70MiB
+      GOGC: "25"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--storage.tsdb.retention.size=256MB"
+      - "--web.enable-remote-write-receiver"
+      - "--enable-feature=exemplar-storage"
+    volumes:
+      - ./lgtm/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./lgtm/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - observability_net
+
+  alloy:
+    image: grafana/alloy:v1.3.1
+    container_name: alloy
+    restart: unless-stopped
+    mem_limit: 80m
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      GOMEMLIMIT: 55MiB
+      GOGC: "25"
+    command:
+      - "run"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+      - "--storage.path=/var/lib/alloy/data"
+      - "/etc/alloy/config.alloy"
+    volumes:
+      - ./lgtm/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy_data:/var/lib/alloy/data
+    depends_on:
+      - loki
+      - tempo
+      - prometheus
+    networks:
+      - observability_net
+
+  grafana:
+    image: grafana/grafana-oss:11.1.0
+    container_name: grafana
+    restart: unless-stopped
+    mem_limit: 128m
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      GOMEMLIMIT: 75MiB
+      GOGC: "25"
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
+      GF_SERVER_ROOT_URL: https://${DOMAIN_NAME:-localhost}/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./lgtm/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    networks:
+      - frontend_net
+      - observability_net
+
+networks:
+  frontend_net:
+    driver: bridge
+  backend_net:
+    driver: bridge
+    internal: true
+  observability_net:
+    driver: bridge
+
+volumes:
+  db_data:
+  wp_data:
+  loki_data:
+  tempo_data:
+  prometheus_data:
+  alloy_data:
+  grafana_data:

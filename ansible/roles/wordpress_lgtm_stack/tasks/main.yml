@@ -1,0 +1,75 @@
+---
+- name: Create stack installation and backup directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ stack_install_dir }}"
+    - "{{ stack_install_dir }}/certs"
+    - "/var/backups/wordpress"
+
+- name: Copy Docker Compose and service configurations to target host
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../docker/"
+    dest: "{{ stack_install_dir }}/"
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Copy automated backup script to target host
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/backup.sh"
+    dest: "{{ stack_install_dir }}/backup.sh"
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Render root-only .env file from encrypted secrets
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ stack_install_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Check if TLS certificate exists
+  ansible.builtin.stat:
+    path: "{{ stack_install_dir }}/certs/tls.crt"
+  register: tls_cert_stat
+
+- name: Generate SAN X.509 TLS certificate for HTTPS termination
+  ansible.builtin.command:
+    cmd: >
+      openssl req -x509 -nodes -days 365 -newkey rsa:2048
+      -keyout {{ stack_install_dir }}/certs/tls.key
+      -out {{ stack_install_dir }}/certs/tls.crt
+      -subj "/C=SG/ST=Singapore/L=Singapore/O=CloudPlatform/CN={{ domain_name }}"
+      -addext "subjectAltName=DNS:{{ domain_name }},DNS:localhost,IP:127.0.0.1"
+  when: not tls_cert_stat.stat.exists
+  changed_when: true
+
+- name: Set strict permissions on TLS private key
+  ansible.builtin.file:
+    path: "{{ stack_install_dir }}/certs/tls.key"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Build and start WordPress + LGTM stack via Docker Compose
+  ansible.builtin.command:
+    cmd: docker compose up -d --build --remove-orphans
+    chdir: "{{ stack_install_dir }}"
+  changed_when: true
+
+- name: Schedule daily automated WordPress & MariaDB backup cron job (02:30 UTC)
+  ansible.builtin.cron:
+    name: "Daily WordPress and MariaDB Backup"
+    minute: "30"
+    hour: "2"
+    user: root
+    job: "{{ stack_install_dir }}/backup.sh >> /var/log/wordpress-backup.log 2>&1"
+    state: present
