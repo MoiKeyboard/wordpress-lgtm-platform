@@ -27,7 +27,16 @@ To rotate application passwords without manual intervention or configuration dri
 
 ---
 
-## 3. Day-2 Operations Commands
+## 3. Grafana Access Control & Anonymous Read-Only Mode
+
+To minimize attack surface on public endpoints while providing zero-friction visibility for assessment and monitoring:
+- **Anonymous Viewer Mode**: Enabled by default (`GF_AUTH_ANONYMOUS_ENABLED=true`, `GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer`). Anyone navigating to `https://<EC2_HOST>/grafana/` is automatically granted **read-only Viewer** privileges to inspect dashboards, Loki logs, and Tempo traces without entering credentials.
+- **Attack Surface Elimination**: User registration is disabled (`GF_USERS_ALLOW_SIGN_UP=false`), organization creation is disabled (`GF_USERS_ALLOW_ORG_CREATE=false`), and password bruteforcing on public forms is mitigated.
+- **Admin Access**: Administrative access (for datasource editing or system settings) is reserved for authenticated users via `admin` and `APP_MASTER_SECRET` via the "Sign In" button.
+
+---
+
+## 4. Day-2 Operations Commands
 
 All containers and configurations reside in `/opt/wordpress-stack` on the EC2 host.
 
@@ -53,7 +62,7 @@ sudo docker compose up -d --build --remove-orphans
 
 ---
 
-## 3. Backup & Disaster Recovery Procedures
+## 5. Backup & Disaster Recovery Procedures
 
 ### Trigger an Immediate Manual Backup
 Automated backups run daily at `02:30 UTC` via root cron and write compressed archives to `/var/backups/wordpress` (with 7-day retention). To trigger an immediate backup:
@@ -71,7 +80,7 @@ zcat /var/backups/wordpress/db_<TIMESTAMP>.sql.gz | \
 
 ---
 
-## 4. Packaging Files for Email Attachment (`.txt` Rule)
+## 6. Packaging Files for Email Attachment (`.txt` Rule)
 
 Per the assignment submission instructions, all non-`.txt` text files can be automatically cloned with a `.txt` extension appended (e.g., `playbook.yml.txt`, `backup.sh.txt`) into `submission_txt/` by running:
 
