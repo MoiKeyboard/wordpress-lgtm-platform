@@ -4,19 +4,30 @@
 
 To run the automated CD pipeline (`.github/workflows/cd.yml`) from a public GitHub repository without exposing credentials, configure the following **Repository Secrets** (`Settings` $\rightarrow$ `Secrets and variables` $\rightarrow$ `Actions`):
 
-| GitHub Secret Name | Description |
-| :--- | :--- |
-| `EC2_HOST` | Public DNS or IP of the target AWS EC2 instance |
-| `EC2_USER` | SSH username on the Ubuntu host (e.g., `devops`) |
-| `SSH_PRIVATE_KEY` | Full PEM/OpenSSH private key file content for the target host |
-| `ANSIBLE_BECOME_PASS` | Sudo password for the SSH user |
-| `MYSQL_ROOT_PASSWORD` | Strong password for MariaDB `root` user (min 8 chars) |
-| `MYSQL_PASSWORD` | Strong password for WordPress database user (`wp_user`) |
-| `GF_SECURITY_ADMIN_PASSWORD` | Strong password for Grafana admin login (`/grafana/`) |
+| GitHub Secret Name | Description | Required? |
+| :--- | :--- | :---: |
+| `EC2_HOST` | Public DNS or IP of the target AWS EC2 instance | Yes |
+| `EC2_USER` | SSH username on the Ubuntu host (e.g., `devops`) | Yes |
+| `SSH_PRIVATE_KEY` | Full PEM/OpenSSH private key file content for the target host | Yes |
+| `ANSIBLE_BECOME_PASS` | Sudo password for the SSH user (`spoved`) | Yes |
+| `APP_MASTER_SECRET` | **Single unified secret** for all internal applications (MariaDB, WordPress, Grafana) | **Yes (Recommended)** |
+| `MYSQL_ROOT_PASSWORD` | Optional override for MariaDB root password (defaults to `APP_MASTER_SECRET`) | No |
+| `MYSQL_PASSWORD` | Optional override for WordPress DB user password (defaults to `APP_MASTER_SECRET`) | No |
+| `GF_SECURITY_ADMIN_PASSWORD` | Optional override for Grafana admin password (defaults to `APP_MASTER_SECRET`) | No |
 
 ---
 
-## 2. Day-2 Operations Commands
+## 2. Automated Secret Rotation Procedure
+
+To rotate application passwords without manual intervention or configuration drift:
+1. Navigate to **GitHub Repository** $\rightarrow$ `Settings` $\rightarrow$ `Secrets and variables` $\rightarrow$ `Actions`.
+2. Update `APP_MASTER_SECRET` with a new strong secret value.
+3. Trigger the **CD - Deploy WordPress & LGTM Stack to AWS EC2** workflow (or push a commit to `main`).
+4. Ansible securely re-renders `/opt/wordpress-stack/.env` (`chmod 0600`) and restarts the container stack with the rotated credentials.
+
+---
+
+## 3. Day-2 Operations Commands
 
 All containers and configurations reside in `/opt/wordpress-stack` on the EC2 host.
 
