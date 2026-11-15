@@ -49,3 +49,18 @@ Prior to architectural design, a non-destructive discovery inspection was execut
 | **Phase 4** | **M4: CI/CD Pipelines & Security** | Create `.github/workflows/ci.yml` and `cd.yml`, configure secrets handling, and add automated backup script + email `.txt` packaging script. |
 | **Phase 5** | **M5: EC2 Provisioning & Verification** | Execute Ansible playbook against the EC2 instance, verify memory footprint (`free -h`, `docker stats`), verify HTTPS WordPress, Grafana dashboards, Loki logs, and Tempo traces. |
 | **Phase 6** | **M6: GitHub Push & Submission Pack** | Push clean repository to public GitHub, configure GitHub Secrets, trigger live CI/CD pipeline run, and run `package-submission.ps1`. |
+
+---
+
+## 4. RAID Log (Risks, Assumptions, Issues, Dependencies)
+
+| ID | Category | Item Description | Impact & Severity | Mitigation Strategy | Status |
+| :---: | :---: | :--- | :---: | :--- | :---: |
+| **R-01** | **Risk** | Constrained RAM on `t2.micro` (965 MiB) causing Linux kernel OOM kills when running 8 containers. | **High** | Provisioned 2,048 MiB `/swapfile` with `vm.swappiness=10`; capped MariaDB pool to 128M; disabled performance schema; set Go runtime `GOMEMLIMIT` + `GOGC=25` across all LGTM components. | **Mitigated** |
+| **R-02** | **Risk** | ACME / Let's Encrypt CA blocks certificate issuance for default AWS domain `*.compute.amazonaws.com`. | **Medium** | Ansible automatically generates a 2048-bit RSA X.509 certificate with Subject Alternative Names matching the EC2 public DNS/IP; provides documented upgrade path to Certbot for custom domains. | **Mitigated** |
+| **A-01** | **Assumption** | AWS Security Group allows inbound TCP traffic on ports 22, 80, and 443; high observability ports (3000, 9090, 3100, 3200) are blocked by cloud perimeter. | **High** | Designed Nginx edge reverse proxy to multiplex `/` (WordPress) and `/grafana/` (Observability) over port 443; telemetry ports remain strictly internal. | **Validated** |
+| **A-02** | **Assumption** | Public GitHub repository requires strict zero-credential policy to comply with enterprise DevSecOps standards. | **High** | Single `APP_MASTER_SECRET` injected at runtime via GitHub Actions Secrets; zero passwords or IP addresses committed to Git; verified by Gitleaks in CI. | **Validated** |
+| **I-01** | **Issue** | Tempo container OOM kill and gRPC frontend timeout during TraceQL block compaction. | **High** | Sized Tempo cgroup memory to `140m` (`GOMEMLIMIT=95MiB`); declared `grpc_listen_port: 9095`; extended Nginx Grafana `proxy_read_timeout` to 120s (PR #4). | **Resolved** |
+| **I-02** | **Issue** | CPU credit exhaustion on `t2.micro` causing high CPU steal (`%st` up to 86%) and slow Ansible convergence. | **Medium** | Kept Ansible tasks lean and idempotent; tuned container CPU quotas; separated heavy build steps into base images. | **Managed** |
+| **D-01** | **Dependency** | Target Ubuntu 22.04 LTS host provides functional systemd and internet egress to pull official Docker Hub images. | **Critical** | Tested base connectivity during pre-flight discovery; pinned official image tags for reproducibility. | **Validated** |
+
