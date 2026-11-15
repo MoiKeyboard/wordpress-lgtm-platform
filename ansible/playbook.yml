@@ -7,12 +7,13 @@
     swap_file_path: /swapfile
     swap_file_size_mb: 2048
     domain_name: "{{ lookup('env', 'DOMAIN_NAME') | default(ansible_host, true) }}"
-    mysql_root_password: "{{ lookup('env', 'MYSQL_ROOT_PASSWORD') }}"
+    app_master_secret: "{{ lookup('env', 'APP_MASTER_SECRET') | default('', true) }}"
+    mysql_root_password: "{{ lookup('env', 'MYSQL_ROOT_PASSWORD') | default(app_master_secret, true) }}"
     mysql_database: "{{ lookup('env', 'MYSQL_DATABASE') | default('wordpress', true) }}"
     mysql_user: "{{ lookup('env', 'MYSQL_USER') | default('wp_user', true) }}"
-    mysql_password: "{{ lookup('env', 'MYSQL_PASSWORD') }}"
+    mysql_password: "{{ lookup('env', 'MYSQL_PASSWORD') | default(app_master_secret, true) }}"
     grafana_admin_user: "{{ lookup('env', 'GF_SECURITY_ADMIN_USER') | default('admin', true) }}"
-    grafana_admin_password: "{{ lookup('env', 'GF_SECURITY_ADMIN_PASSWORD') }}"
+    grafana_admin_password: "{{ lookup('env', 'GF_SECURITY_ADMIN_PASSWORD') | default(app_master_secret, true) }}"
 
   pre_tasks:
     - name: Validate required secrets are provided
@@ -21,7 +22,7 @@
           - mysql_root_password | length >= 8
           - mysql_password | length >= 8
           - grafana_admin_password | length >= 8
-        fail_msg: "Mandatory secret environment variables (MYSQL_ROOT_PASSWORD, MYSQL_PASSWORD, GF_SECURITY_ADMIN_PASSWORD) must be set and at least 8 characters long."
+        fail_msg: "Application secrets must be set. Provide APP_MASTER_SECRET (recommended) or individual passwords with at least 8 characters."
         quiet: true
 
   roles:

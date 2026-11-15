@@ -48,6 +48,7 @@ jobs:
         working-directory: ansible
         env:
           DOMAIN_NAME: ${{ secrets.EC2_HOST }}
+          APP_MASTER_SECRET: ${{ secrets.APP_MASTER_SECRET }}
           MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
           MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
           GF_SECURITY_ADMIN_PASSWORD: ${{ secrets.GF_SECURITY_ADMIN_PASSWORD }}
