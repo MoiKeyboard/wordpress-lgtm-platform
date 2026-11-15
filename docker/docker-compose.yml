@@ -114,11 +114,11 @@ services:
     container_name: tempo
     user: "0"
     restart: unless-stopped
-    mem_limit: 72m
+    mem_limit: 140m
     security_opt:
       - no-new-privileges:true
     environment:
-      GOMEMLIMIT: 45MiB
+      GOMEMLIMIT: 95MiB
       GOGC: "25"
     command: ["-config.file=/etc/tempo/tempo-config.yml"]
     volumes:
