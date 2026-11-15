@@ -123,7 +123,8 @@ This platform is structured into modular layers—from network perimeter down to
   - Executes post-deployment HTTPS smoke checks against WordPress (`/`), rate limits, XML-RPC (`403`), and Grafana health.
 
 ### 8. AI Agent & Platform Engineering Automation Layer
-* **Autonomous Platform Operations:** Designed for operation by AI agents (e.g. Antigravity) and platform engineers using declarative instructions.
+* **Autonomous Operating Guidelines ([AGENTS.md](AGENTS.md)):** Establishes strict operating constraints, Zero-Secrets-in-Git policies, and quality gates for autonomous AI agents and platform engineers.
+* **Modular Agent Skills Suite (`.agent/skills/`):** Contains declarative skills for automated EC2 provisioning, secret rotation, observability triage, security compliance audits, and disaster recovery drills.
 * **Automated Runbook Execution:** Standard operating procedures—including zero-downtime secret rotation, host diagnostics, and disaster recovery—are documented as executable workflows in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
 ---
@@ -212,10 +213,18 @@ Once deployment completes, verify the live platform endpoints:
 
 ```
 .
+├── .agent/
+│   └── skills/                  # Autonomous Platform Engineer agent skills
+│       ├── platform-ec2-provisioning/
+│       ├── platform-secret-lifecycle/
+│       ├── platform-observability-triage/
+│       ├── platform-security-compliance/
+│       └── platform-disaster-recovery/
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml               # PR checks: Gitleaks, Ansible lint, Docker lint, Trivy
 │       └── cd.yml               # GitOps CD: Ephemeral SSH in RAM, Ansible convergence & smoke tests
+├── AGENTS.md                    # Autonomous AI agent operating guidelines & guardrails
 ├── ansible/
 │   ├── ansible.cfg              # Ansible configuration (pipelining, SSH settings)
 │   ├── inventory.ini.example    # Sample Ansible inventory template
