@@ -6,14 +6,14 @@
     stack_install_dir: /opt/wordpress-stack
     swap_file_path: /swapfile
     swap_file_size_mb: 2048
-    domain_name: "{{ lookup('env', 'DOMAIN_NAME') | default(ansible_host, true) }}"
-    app_master_secret: "{{ lookup('env', 'APP_MASTER_SECRET') | default('', true) }}"
-    mysql_root_password: "{{ lookup('env', 'MYSQL_ROOT_PASSWORD') | default(app_master_secret, true) }}"
-    mysql_database: "{{ lookup('env', 'MYSQL_DATABASE') | default('wordpress', true) }}"
-    mysql_user: "{{ lookup('env', 'MYSQL_USER') | default('wp_user', true) }}"
-    mysql_password: "{{ lookup('env', 'MYSQL_PASSWORD') | default(app_master_secret, true) }}"
-    grafana_admin_user: "{{ lookup('env', 'GF_SECURITY_ADMIN_USER') | default('admin', true) }}"
-    grafana_admin_password: "{{ lookup('env', 'GF_SECURITY_ADMIN_PASSWORD') | default(app_master_secret, true) }}"
+    domain_name: "{{ DOMAIN_NAME | default(lookup('env', 'DOMAIN_NAME'), true) | default(ansible_host, true) }}"
+    app_master_secret: "{{ APP_MASTER_SECRET | default(lookup('env', 'APP_MASTER_SECRET'), true) | default('', true) }}"
+    mysql_root_password: "{{ MYSQL_ROOT_PASSWORD | default(lookup('env', 'MYSQL_ROOT_PASSWORD'), true) | default(app_master_secret, true) }}"
+    mysql_database: "{{ MYSQL_DATABASE | default(lookup('env', 'MYSQL_DATABASE'), true) | default('wordpress', true) }}"
+    mysql_user: "{{ MYSQL_USER | default(lookup('env', 'MYSQL_USER'), true) | default('wp_user', true) }}"
+    mysql_password: "{{ MYSQL_PASSWORD | default(lookup('env', 'MYSQL_PASSWORD'), true) | default(app_master_secret, true) }}"
+    grafana_admin_user: "{{ GF_SECURITY_ADMIN_USER | default(lookup('env', 'GF_SECURITY_ADMIN_USER'), true) | default('admin', true) }}"
+    grafana_admin_password: "{{ GF_SECURITY_ADMIN_PASSWORD | default(lookup('env', 'GF_SECURITY_ADMIN_PASSWORD'), true) | default(app_master_secret, true) }}"
 
   pre_tasks:
     - name: Validate required secrets are provided
